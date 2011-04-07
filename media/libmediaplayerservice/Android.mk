@@ -34,6 +34,7 @@ LOCAL_SHARED_LIBRARIES :=     		\
 	libstagefright_color_conversion         \
 	libstagefright_foundation               \
 	libsurfaceflinger_client		\
+    libgstmetadataretriever         \
 	libgstplayer
 
 LOCAL_STATIC_LIBRARIES := \
