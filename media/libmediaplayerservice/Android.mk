@@ -11,7 +11,6 @@ LOCAL_SRC_FILES:=               \
     MediaPlayerService.cpp      \
     MetadataRetrieverClient.cpp \
     TestPlayerStub.cpp          \
-    FLACPlayer.cpp              \
     MidiMetadataRetriever.cpp   \
     MidiFile.cpp                \
     StagefrightPlayer.cpp       \
@@ -66,13 +65,8 @@ LOCAL_C_INCLUDES :=                                                 \
 	$(TOP)/frameworks/base/include/media/stagefright/openmax \
 	$(TOP)/frameworks/base/media/libstagefright/include             \
 	$(TOP)/frameworks/base/media/libstagefright/rtsp                \
-<<<<<<< HEAD
 	$(TOP)/external/tremolo/Tremolo 				\
 	$(TOP)/external/gstreamer_aggregate/gst-android/gstplayer
-=======
-        $(TOP)/external/flac/include                                    \
-        $(TOP)/external/tremolo/Tremolo
->>>>>>> github/gingerbread
 
 LOCAL_MODULE:= libmediaplayerservice
 
