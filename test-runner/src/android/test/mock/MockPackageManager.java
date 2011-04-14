@@ -490,8 +490,11 @@ public class MockPackageManager extends PackageManager {
         throw new UnsupportedOperationException();
     }
 
+    /**
+     * @hide - to match hiding in superclass
+     */
     @Override
-    public void setPackageObbPath(String packageName, String path) {
+    public List<PackageInfo> getInstalledThemePackages() {
         throw new UnsupportedOperationException();
     }
 }

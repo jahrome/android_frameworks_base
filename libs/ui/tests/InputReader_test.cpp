@@ -131,6 +131,10 @@ private:
         return mFilterJumpyTouchEvents;
     }
 
+    virtual nsecs_t getVirtualKeyQuietTime() {
+        return 0;
+    }
+
     virtual void getVirtualKeyDefinitions(const String8& deviceName,
             Vector<VirtualKeyDefinition>& outVirtualKeyDefinitions) {
         ssize_t index = mVirtualKeyDefinitions.indexOfKey(deviceName);
@@ -630,6 +634,14 @@ private:
 
     virtual InputDispatcherInterface* getDispatcher() {
         return mDispatcher.get();
+    }
+
+    virtual void disableVirtualKeysUntil(nsecs_t time) {
+    }
+
+    virtual bool shouldDropVirtualKey(nsecs_t now,
+            InputDevice* device, int32_t keyCode, int32_t scanCode) {
+        return false;
     }
 };
 
@@ -1356,7 +1368,7 @@ TEST_F(SwitchInputMapperTest, GetSources) {
     SwitchInputMapper* mapper = new SwitchInputMapper(mDevice);
     addMapperAndConfigure(mapper);
 
-    ASSERT_EQ(uint32_t(0), mapper->getSources());
+    ASSERT_EQ(uint32_t(AINPUT_SOURCE_SWITCH), mapper->getSources());
 }
 
 TEST_F(SwitchInputMapperTest, GetSwitchState) {

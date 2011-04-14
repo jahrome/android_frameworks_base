@@ -136,14 +136,26 @@ public class CompatibilityInfo {
      */
     public final int appFlags;
     
+    /**
+     * Whether the application supports third-party theming.
+     */
+    public final boolean isThemeable;
+
     public CompatibilityInfo(ApplicationInfo appInfo) {
+        isThemeable = appInfo.isThemeable;
         appFlags = appInfo.flags;
         
         if ((appInfo.flags & ApplicationInfo.FLAG_SUPPORTS_LARGE_SCREENS) != 0) {
-            mCompatibilityFlags |= LARGE_SCREENS | CONFIGURED_LARGE_SCREENS;
+            // Saying you support large screens also implies you support xlarge
+            // screens; there is no compatibility mode for a large app on an
+            // xlarge screen.
+            mCompatibilityFlags |= LARGE_SCREENS | CONFIGURED_LARGE_SCREENS
+                    | XLARGE_SCREENS | CONFIGURED_XLARGE_SCREENS
+                    | EXPANDABLE | CONFIGURED_EXPANDABLE;
         }
         if ((appInfo.flags & ApplicationInfo.FLAG_SUPPORTS_XLARGE_SCREENS) != 0) {
-            mCompatibilityFlags |= XLARGE_SCREENS | CONFIGURED_XLARGE_SCREENS;
+            mCompatibilityFlags |= XLARGE_SCREENS | CONFIGURED_XLARGE_SCREENS
+                    | EXPANDABLE | CONFIGURED_EXPANDABLE;
         }
         if ((appInfo.flags & ApplicationInfo.FLAG_RESIZEABLE_FOR_SCREENS) != 0) {
             mCompatibilityFlags |= EXPANDABLE | CONFIGURED_EXPANDABLE;
@@ -163,12 +175,13 @@ public class CompatibilityInfo {
     }
 
     private CompatibilityInfo(int appFlags, int compFlags,
-            int dens, float scale, float invertedScale) {
+            int dens, float scale, float invertedScale, boolean isThemeable) {
         this.appFlags = appFlags;
         mCompatibilityFlags = compFlags;
         applicationDensity = dens;
         applicationScale = scale;
         applicationInvertedScale = invertedScale;
+        this.isThemeable = isThemeable;
     }
 
     private CompatibilityInfo() {
@@ -180,7 +193,8 @@ public class CompatibilityInfo {
                 EXPANDABLE | CONFIGURED_EXPANDABLE,
                 DisplayMetrics.DENSITY_DEVICE,
                 1.0f,
-                1.0f);
+                1.0f,
+                true);
     }
 
     /**
@@ -188,7 +202,7 @@ public class CompatibilityInfo {
      */
     public CompatibilityInfo copy() {
         CompatibilityInfo info = new CompatibilityInfo(appFlags, mCompatibilityFlags,
-                applicationDensity, applicationScale, applicationInvertedScale);
+                applicationDensity, applicationScale, applicationInvertedScale, isThemeable);
         return info;
     }
  

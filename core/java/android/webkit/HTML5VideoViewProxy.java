@@ -138,6 +138,10 @@ class HTML5VideoViewProxy extends Handler
                         mCurrentProxy.dispatchOnEnded();
                     else
                         mCurrentProxy.dispatchOnPaused();
+
+                    // Re enable plugin views.
+                    mCurrentProxy.getWebView().getViewManager().showAll();
+
                     isVideoSelfEnded = false;
                     mCurrentProxy = null;
                     mLayout.removeView(mVideoView);
@@ -199,6 +203,9 @@ class HTML5VideoViewProxy extends Handler
             mTimer = new Timer();
             mVideoView.start();
             client.onShowCustomView(mLayout, mCallback);
+            // Plugins like Flash will draw over the video so hide
+            // them while we're playing.
+            mCurrentProxy.getWebView().getViewManager().hideAll();
         }
 
         public static boolean isPlaying(HTML5VideoViewProxy proxy) {
@@ -359,7 +366,7 @@ class HTML5VideoViewProxy extends Handler
         // Start the download. Called on WebCore thread.
         public void start() {
             retainQueue();
-            mRequestHandle = mRequestQueue.queueRequest(mUrl, "GET", null, this, null, 0);
+            mRequestHandle = mRequestQueue.queueRequest(mUrl, "GET", null, this, null, 0, -1, false);
         }
         // Cancel the download if active and release the queue. Called on WebCore thread.
         public void cancelAndReleaseQueue() {
@@ -597,6 +604,10 @@ class HTML5VideoViewProxy extends Handler
      */
     public static HTML5VideoViewProxy getInstance(WebViewCore webViewCore, int nativePtr) {
         return new HTML5VideoViewProxy(webViewCore.getWebView(), nativePtr);
+    }
+
+    /* package */ WebView getWebView() {
+        return mWebView;
     }
 
     private native void nativeOnPrepared(int duration, int width, int height, int nativePointer);

@@ -60,7 +60,7 @@ struct OMXCodec : public MediaSource,
 
     virtual status_t pause();
 
-    void on_message(const omx_message &msg);
+    void registerBuffers(const sp<IMemoryHeap> &mem);
 
     // from MediaBufferObserver
     virtual void signalBufferReturned(MediaBuffer *buffer);
@@ -69,6 +69,13 @@ protected:
     virtual ~OMXCodec();
 
 private:
+
+    // Make sure mLock is accessible to OMXCodecObserver
+    friend class OMXCodecObserver;
+
+    // Call this with mLock hold
+    void on_message(const omx_message &msg);
+
     enum State {
         DEAD,
         LOADED,
@@ -110,6 +117,8 @@ private:
         kRequiresLargerEncoderOutputBuffer    = 4096,
         kOutputBuffersAreUnreadable           = 8192,
         kStoreMetaDataInInputVideoBuffers     = 16384,
+        kCanNotSetVideoParameters             = 32768,
+        kDoesNotRequireMemcpyOnOutputPort     = 65536
     };
 
     struct BufferInfo {
@@ -137,7 +146,7 @@ private:
     sp<MediaSource> mSource;
     Vector<CodecSpecificData *> mCodecSpecificData;
     size_t mCodecSpecificDataIndex;
-
+    sp<IMemoryHeap> mPmemInfo;
     sp<MemoryDealer> mDealer[2];
 
     State mState;

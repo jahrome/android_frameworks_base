@@ -1065,10 +1065,11 @@ public final class ViewRoot extends Handler implements ViewParent,
                         }
                     }
                     mSurfaceHolder.mSurfaceLock.lock();
-                    // Make surface invalid.
-                    //mSurfaceHolder.mSurface.copyFrom(mSurface);
-                    mSurfaceHolder.mSurface = new Surface();
-                    mSurfaceHolder.mSurfaceLock.unlock();
+                    try {
+                        mSurfaceHolder.mSurface = new Surface();
+                    } finally {
+                        mSurfaceHolder.mSurfaceLock.unlock();
+                    }
                 }
             }
             
@@ -2672,6 +2673,9 @@ public final class ViewRoot extends Handler implements ViewParent,
             switch (effectId) {
                 case SoundEffectConstants.CLICK:
                     audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK);
+                    if (audioManager.queryHapticsAllEnabled()){
+                        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_RELEASED, false);
+                        };
                     return;
                 case SoundEffectConstants.NAVIGATION_DOWN:
                     audioManager.playSoundEffect(AudioManager.FX_FOCUS_NAVIGATION_DOWN);

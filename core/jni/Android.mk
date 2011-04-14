@@ -80,6 +80,7 @@ LOCAL_SRC_FILES:= \
 	android_util_Process.cpp \
 	android_util_StringBlock.cpp \
 	android_util_XmlBlock.cpp \
+	android_util_PackageRedirectionMap.cpp \
 	android/graphics/AutoDecodeCancel.cpp \
 	android/graphics/Bitmap.cpp \
 	android/graphics/BitmapFactory.cpp \
@@ -103,6 +104,7 @@ LOCAL_SRC_FILES:= \
 	android_graphics_PixelFormat.cpp \
 	android/graphics/Picture.cpp \
 	android/graphics/PorterDuff.cpp \
+	android/graphics/BitmapRegionDecoder.cpp \
 	android/graphics/Rasterizer.cpp \
 	android/graphics/Region.cpp \
 	android/graphics/Shader.cpp \
@@ -129,6 +131,7 @@ LOCAL_SRC_FILES:= \
 	android_server_BluetoothService.cpp \
 	android_server_BluetoothEventLoop.cpp \
 	android_server_BluetoothA2dpService.cpp \
+	android_server_BluetoothHidService.cpp \
 	android_server_Watchdog.cpp \
 	android_message_digest_sha1.cpp \
 	android_ddm_DdmHandleNativeHeap.cpp \
@@ -140,6 +143,23 @@ LOCAL_SRC_FILES:= \
 	android_backup_BackupHelperDispatcher.cpp \
 	android_content_res_ObbScanner.cpp \
     android_content_res_Configuration.cpp
+
+ifeq ($(BOARD_HAVE_FM_RADIO),true)
+ifeq ($(BOARD_WLAN_DEVICE),bcm4329)
+	LOCAL_SRC_FILES += android_hardware_fm_bcm4325.cpp
+endif
+ifeq ($(BOARD_WLAN_DEVICE),wl1251)
+	LOCAL_SRC_FILES += android_hardware_fm_wl1271.cpp
+endif
+ifeq ($(BOARD_WLAN_DEVICE),wl1271)
+	LOCAL_SRC_FILES += android_hardware_fm_wl1271.cpp
+endif
+endif
+
+ifeq ($(BOARD_HAVE_SQN_WIMAX),true)
+	LOCAL_SRC_FILES += android_net_wimax_WimaxCommonAPI.cpp
+	LOCAL_CFLAGS += -DBOARD_HAVE_SQN_WIMAX
+endif
 
 LOCAL_C_INCLUDES += \
 	$(JNI_H_INCLUDE) \

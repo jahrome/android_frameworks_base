@@ -66,9 +66,9 @@ class PatternUnlockScreen extends LinearLayoutWithDefaultTouchRecepient
     private int mTotalFailedPatternAttempts = 0;
     private CountDownTimer mCountdownTimer = null;
 
-    private final LockPatternUtils mLockPatternUtils;
-    private final KeyguardUpdateMonitor mUpdateMonitor;
-    private final KeyguardScreenCallback mCallback;
+    private LockPatternUtils mLockPatternUtils;
+    private KeyguardUpdateMonitor mUpdateMonitor;
+    private KeyguardScreenCallback mCallback;
 
     /**
      * whether there is a fallback option available when the pattern is forgotten.
@@ -95,7 +95,7 @@ class PatternUnlockScreen extends LinearLayoutWithDefaultTouchRecepient
     private TextView mStatus1;
     private TextView mStatusSep;
     private TextView mStatus2;
-
+    private TextView mCustomMsg;
 
     private LockPatternView mLockPatternView;
 
@@ -236,6 +236,10 @@ class PatternUnlockScreen extends LinearLayoutWithDefaultTouchRecepient
         mLockPatternView.setFocusable(false);
         mLockPatternView.setOnPatternListener(new UnlockPatternListener());
 
+        mLockPatternView.setVisibleDots(mLockPatternUtils.isVisibleDotsEnabled());
+        mLockPatternView.setShowErrorPath(mLockPatternUtils.isShowErrorPath());
+        mLockPatternView.setIncorrectDelay(mLockPatternUtils.getIncorrectDelay());
+
         // stealth mode will be the same for the life of this screen
         mLockPatternView.setInStealthMode(!mLockPatternUtils.isVisiblePatternEnabled());
 
@@ -290,19 +294,25 @@ class PatternUnlockScreen extends LinearLayoutWithDefaultTouchRecepient
                         R.drawable.ic_lock_idle_lock, 0, 0, 0);
             }
 
-            mStatus1.setVisibility(View.VISIBLE);
+            if (mInstructions.equals(getContext().getString(R.string.lockscreen_pattern_wrong))
+                    && !mLockPatternUtils.isShowUnlockErrMsg()) {
+                mStatus1.setVisibility(View.GONE);
+            } else {
+                mStatus1.setVisibility(View.VISIBLE);
+            }
+
             mStatusSep.setVisibility(View.GONE);
             mStatus2.setVisibility(View.GONE);
         } else if (mShowingBatteryInfo && mNextAlarm == null) {
             // battery only
             if (mPluggedIn) {
-              if (mBatteryLevel >= 100) {
+              if (mUpdateMonitor.isDeviceCharged()) {
                 mStatus1.setText(getContext().getString(R.string.lockscreen_charged));
               } else {
                   mStatus1.setText(getContext().getString(R.string.lockscreen_plugged_in, mBatteryLevel));
               }
             } else {
-                mStatus1.setText(getContext().getString(R.string.lockscreen_low_battery));
+                mStatus1.setText(getContext().getString(R.string.lockscreen_low_battery, mBatteryLevel));
             }
             mStatus1.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_lock_idle_charging, 0, 0, 0);
 
@@ -332,7 +342,12 @@ class PatternUnlockScreen extends LinearLayoutWithDefaultTouchRecepient
                 mStatus2.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0);
             }
 
-            mStatus1.setVisibility(View.VISIBLE);
+            if (mLockPatternUtils.isShowUnlockMsg()) {
+                mStatus1.setVisibility(View.VISIBLE);
+            } else {
+                mStatus1.setVisibility(View.GONE);
+            }
+
             mStatusSep.setVisibility(View.VISIBLE);
             mStatus2.setVisibility(View.VISIBLE);
         } else {
@@ -478,6 +493,9 @@ class PatternUnlockScreen extends LinearLayoutWithDefaultTouchRecepient
     /** {@inheritDoc} */
     public void cleanUp() {
         mUpdateMonitor.removeCallback(this);
+        mLockPatternUtils = null;
+        mUpdateMonitor = null;
+        mCallback = null;
     }
 
     @Override
@@ -537,7 +555,7 @@ class PatternUnlockScreen extends LinearLayoutWithDefaultTouchRecepient
                     updateStatusLines();
                     mLockPatternView.postDelayed(
                             mCancelPatternRunnable,
-                            PATTERN_CLEAR_TIMEOUT_MS);
+                            mLockPatternView.getIncorrectDelay());
                 }
             }
         }
@@ -576,5 +594,9 @@ class PatternUnlockScreen extends LinearLayoutWithDefaultTouchRecepient
 
     public void onPhoneStateChanged(String newState) {
         refreshEmergencyButtonText();
+    }
+
+    public void onMusicChanged() {
+
     }
 }

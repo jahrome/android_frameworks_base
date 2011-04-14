@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2007 The Android Open Source Project
+ * Patched by Sven Dawitz; Copyright (C) 2011 CyanogenMod Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,6 +39,7 @@ import static android.view.WindowManager.LayoutParams.TYPE_WALLPAPER;
 
 import com.android.internal.app.IBatteryStats;
 import com.android.internal.policy.PolicyManager;
+import com.android.internal.policy.impl.CmPhoneWindowManager;
 import com.android.internal.policy.impl.PhoneWindowManager;
 import com.android.internal.view.IInputContext;
 import com.android.internal.view.IInputMethodClient;
@@ -522,9 +524,8 @@ public class WindowManagerService extends IWindowManager.Stub
                 } catch (InterruptedException e) {
                 }
             }
+            return thr.mService;
         }
-
-        return thr.mService;
     }
 
     static class WMThread extends Thread {
@@ -1482,6 +1483,7 @@ public class WindowManagerService extends IWindowManager.Stub
                 WindowState wb = localmWindows.get(foundI-1);
                 if (wb.mBaseLayer < maxLayer &&
                         wb.mAttachedWindow != foundW &&
+                        wb.mAttachedWindow != foundW.mAttachedWindow &&
                         (wb.mAttrs.type != TYPE_APPLICATION_STARTING ||
                                 wb.mToken != foundW.mToken)) {
                     // This window is not related to the previous one in any
@@ -5029,13 +5031,13 @@ public class WindowManagerService extends IWindowManager.Stub
                     mScreenLayout = Configuration.SCREENLAYOUT_SIZE_LARGE;
                 } else {
                     mScreenLayout = Configuration.SCREENLAYOUT_SIZE_NORMAL;
-
-                    // If this screen is wider than normal HVGA, or taller
-                    // than FWVGA, then for old apps we want to run in size
-                    // compatibility mode.
-                    if (shortSize > 321 || longSize > 570) {
-                        mScreenLayout |= Configuration.SCREENLAYOUT_COMPAT_NEEDED;
-                    }
+                }
+                
+                // If this screen is wider than normal HVGA, or taller
+                // than FWVGA, then for old apps we want to run in size
+                // compatibility mode.
+                if (shortSize > 321 || longSize > 570) {
+                    mScreenLayout |= Configuration.SCREENLAYOUT_COMPAT_NEEDED;
                 }
 
                 // Is this a long screen?
@@ -5250,20 +5252,20 @@ public class WindowManagerService extends IWindowManager.Stub
         
         /* Provides an opportunity for the window manager policy to intercept early key
          * processing as soon as the key has been read from the device. */
-        public int interceptKeyBeforeQueueing(long whenNanos, int keyCode, boolean down,
-                int policyFlags, boolean isScreenOn) {
-            return mPolicy.interceptKeyBeforeQueueing(whenNanos,
-                    keyCode, down, policyFlags, isScreenOn);
+        public int interceptKeyBeforeQueueing(long whenNanos, int action, int flags,
+                int keyCode, int scanCode, int policyFlags, boolean isScreenOn) {
+            return mPolicy.interceptKeyBeforeQueueing(whenNanos, action, flags,
+                    keyCode, scanCode, policyFlags, isScreenOn);
         }
         
         /* Provides an opportunity for the window manager policy to process a key before
          * ordinary dispatch. */
         public boolean interceptKeyBeforeDispatching(InputChannel focus,
-                int action, int flags, int keyCode, int metaState, int repeatCount,
+                int action, int flags, int keyCode, int scanCode, int metaState, int repeatCount,
                 int policyFlags) {
             WindowState windowState = getWindowStateForInputChannel(focus);
             return mPolicy.interceptKeyBeforeDispatching(windowState, action, flags,
-                    keyCode, metaState, repeatCount, policyFlags);
+                    keyCode, scanCode, metaState, repeatCount, policyFlags);
         }
         
         /* Called when the current input focus changes.
@@ -6003,6 +6005,11 @@ public class WindowManagerService extends IWindowManager.Stub
         // Input channel
         InputChannel mInputChannel;
         
+        // Used to improve performance of toString()
+        String mStringNameCache;
+        CharSequence mLastTitle;
+        boolean mWasPaused;
+
         WindowState(Session s, IWindow c, WindowToken token,
                WindowState attachedWindow, WindowManager.LayoutParams a,
                int viewVisibility) {
@@ -7260,9 +7267,14 @@ public class WindowManagerService extends IWindowManager.Stub
 
         @Override
         public String toString() {
-            return "Window{"
-                + Integer.toHexString(System.identityHashCode(this))
-                + " " + mAttrs.getTitle() + " paused=" + mToken.paused + "}";
+            if (mStringNameCache == null || mLastTitle != mAttrs.getTitle()
+                    || mWasPaused != mToken.paused) {
+                mLastTitle = mAttrs.getTitle();
+                mWasPaused = mToken.paused;
+                mStringNameCache = "Window{" + Integer.toHexString(System.identityHashCode(this))
+                        + " " + mLastTitle + " paused=" + mWasPaused + "}";
+            }
+            return mStringNameCache;
         }
     }
 
@@ -7591,7 +7603,8 @@ public class WindowManagerService extends IWindowManager.Stub
                 WindowState win = allAppWindows.get(i);
                 if (win == startingWindow || win.mAppFreezing
                         || win.mViewVisibility != View.VISIBLE
-                        || win.mAttrs.type == TYPE_APPLICATION_STARTING) {
+                        || win.mAttrs.type == TYPE_APPLICATION_STARTING
+                        || win.mDestroying) {
                     continue;
                 }
                 if (DEBUG_VISIBILITY) {
@@ -8727,7 +8740,7 @@ public class WindowManagerService extends IWindowManager.Stub
                                         + " interesting=" + numInteresting
                                         + " drawn=" + wtoken.numDrawnWindows);
                                 wtoken.allDrawn = true;
-                                changes |= PhoneWindowManager.FINISH_LAYOUT_REDO_ANIM;
+                                changes |= CmPhoneWindowManager.FINISH_LAYOUT_REDO_ANIM;
 
                                 // We can now show all of the drawn windows!
                                 if (!mOpeningApps.contains(wtoken)) {

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2007 The Android Open Source Project
+ * Patched by Sven Dawitz; Copyright (C) 2011 CyanogenMod Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,6 +41,7 @@ import android.os.PowerManager;
 import android.os.RemoteException;
 import android.os.SystemClock;
 import android.os.SystemProperties;
+import android.provider.CmSystem;
 import android.provider.Settings;
 import android.telephony.TelephonyManager;
 import android.util.Config;
@@ -48,6 +50,7 @@ import android.util.Log;
 import android.view.KeyEvent;
 import android.view.WindowManagerImpl;
 import android.view.WindowManagerPolicy;
+import android.widget.TextView;
 
 
 /**
@@ -213,7 +216,7 @@ public class KeyguardViewMediator implements KeyguardViewCallback,
 
     private int mWakelockSequence;
 
-    private PhoneWindowManager mCallback;
+    private CmPhoneWindowManager mCallback;
 
     /**
      * If the user has disabled the keyguard, then requests to exit, this is
@@ -245,6 +248,12 @@ public class KeyguardViewMediator implements KeyguardViewCallback,
      */
     private boolean mWaitingUntilKeyguardVisible = false;
 
+    private static String mArtist = null;
+    private static String mTrack = null;
+    private static Boolean mPlaying = null;
+    private static long mSongId = 0;
+    private static long mAlbumId = 0;
+
     public KeyguardViewMediator(Context context, PhoneWindowManager callback,
             LocalPowerManager powerManager) {
         mContext = context;
@@ -269,7 +278,8 @@ public class KeyguardViewMediator implements KeyguardViewCallback,
         context.registerReceiver(mBroadCastReceiver, filter);
         mAlarmManager = (AlarmManager) context
                 .getSystemService(Context.ALARM_SERVICE);
-        mCallback = callback;
+
+        mCallback = (CmPhoneWindowManager)callback;
 
         mUpdateMonitor = new KeyguardUpdateMonitor(context);
 
@@ -286,6 +296,12 @@ public class KeyguardViewMediator implements KeyguardViewCallback,
         mUserPresentIntent.addFlags(Intent.FLAG_RECEIVER_REPLACE_PENDING);
 
         final ContentResolver cr = mContext.getContentResolver();
+
+        IntentFilter iF = new IntentFilter();
+        iF.addAction("com.android.music.metachanged");
+        iF.addAction("com.android.music.playstatechanged");
+        mContext.registerReceiver(mMusicReceiver, iF);
+
         mShowLockIcon = (Settings.System.getInt(cr, "show_status_bar_lock", 0) == 1);
     }
 
@@ -321,26 +337,56 @@ public class KeyguardViewMediator implements KeyguardViewCallback,
             } else if (mShowing) {
                 notifyScreenOffLocked();
                 resetStateLocked();
-            } else if (why == WindowManagerPolicy.OFF_BECAUSE_OF_TIMEOUT) {
-                // if the screen turned off because of timeout, set an alarm
-                // to enable it a little bit later (i.e, give the user a chance
-                // to turn the screen back on within a certain window without
-                // having to unlock the screen)
-                long when = SystemClock.elapsedRealtime() + KEYGUARD_DELAY_MS;
-                Intent intent = new Intent(DELAYED_KEYGUARD_ACTION);
-                intent.putExtra("seq", mDelayedShowingSequence);
-                PendingIntent sender = PendingIntent.getBroadcast(mContext,
-                        0, intent, PendingIntent.FLAG_CANCEL_CURRENT);
-                mAlarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, when,
-                        sender);
-                if (DEBUG) Log.d(TAG, "setting alarm to turn off keyguard, seq = "
-                                 + mDelayedShowingSequence);
+            } else if (why == WindowManagerPolicy.OFF_BECAUSE_OF_TIMEOUT
+                    || why == WindowManagerPolicy.OFF_BECAUSE_OF_USER) {
+                final ContentResolver cr = mContext.getContentResolver();
+
+                // retrieve the correct timeout setting depending on why
+                // the screen went off
+                int timeoutDelay = (why == WindowManagerPolicy.OFF_BECAUSE_OF_TIMEOUT ? Settings.System
+                        .getInt(cr, Settings.System.SCREEN_LOCK_TIMEOUT_DELAY, KEYGUARD_DELAY_MS)
+                        : Settings.System
+                                .getInt(cr, Settings.System.SCREEN_LOCK_SCREENOFF_DELAY, 0));
+
+                if (DEBUG)
+                    Log.d(TAG, "Lock screen timeout delay is " + String.valueOf(timeoutDelay)
+                            + "ms");
+
+                // if there is a delay, turn on the screen lock after the delay
+                // expires
+                // otherwise turn it on now
+                if (timeoutDelay > 0) {
+                    delayedScreenLockOn(timeoutDelay);
+                } else {
+                    doKeyguard();
+                }
+
             } else if (why == WindowManagerPolicy.OFF_BECAUSE_OF_PROX_SENSOR) {
                 // Do not enable the keyguard if the prox sensor forced the screen off.
             } else {
                 doKeyguard();
             }
         }
+    }
+
+    /**
+     * Handles setting an alarm to enable the screen lock after a delay
+     */
+    private void delayedScreenLockOn(int delay) {
+        final ContentResolver cr = mContext.getContentResolver();
+
+        mShowLockIcon = (Settings.System.getInt(cr, "show_status_bar_lock", 0) == 1);
+        // set an alarm to enable the screen lock a little bit later
+        // (i.e, give the user a chance to turn the screen back on
+        // within a certain window without having to unlock the screen)
+        long when = SystemClock.elapsedRealtime() + delay;
+        Intent intent = new Intent(DELAYED_KEYGUARD_ACTION);
+        intent.putExtra("seq", mDelayedShowingSequence);
+        PendingIntent sender = PendingIntent.getBroadcast(mContext, 0, intent,
+                PendingIntent.FLAG_CANCEL_CURRENT);
+        mAlarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, when, sender);
+        if (DEBUG)
+            Log.d(TAG, "setting alarm to turn off keyguard, seq = " + mDelayedShowingSequence);
     }
 
     /**
@@ -516,6 +562,12 @@ public class KeyguardViewMediator implements KeyguardViewCallback,
      */
     private void doKeyguard() {
         synchronized (this) {
+            // override lockscreen if selected in tablet tweaks
+            int defValue=(CmSystem.getDefaultBool(mContext, CmSystem.CM_DEFAULT_DISABLE_LOCKSCREEN) ? 1 : 0);
+            boolean disableLockscreen=(Settings.System.getInt(mContext.getContentResolver(),
+                    Settings.System.LOCKSCREEN_DISABLED, defValue) == 1);
+            if(disableLockscreen)
+                return;
             // if another app is disabling us, don't show
             if (!mExternallyEnabled) {
                 if (DEBUG) Log.d(TAG, "doKeyguard: not showing because externally disabled");
@@ -964,7 +1016,7 @@ public class KeyguardViewMediator implements KeyguardViewCallback,
                 Log.d(TAG, "playSounds: whichSound = " + whichSound + "; soundPath was null");
             }
         }
-    }        
+    }
 
     /**
      * Handle message sent by {@link #showLocked}.
@@ -1130,6 +1182,35 @@ public class KeyguardViewMediator implements KeyguardViewCallback,
             if (DEBUG) Log.d(TAG, "handleNotifyScreenOn");
             mKeyguardViewManager.onScreenTurnedOn();
         }
+    }
+    private BroadcastReceiver mMusicReceiver = new BroadcastReceiver() {
+
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            mArtist = intent.getStringExtra("artist");
+            mTrack = intent.getStringExtra("track");
+            mPlaying = intent.getBooleanExtra("playing", false);
+            mSongId = intent.getLongExtra("songid", 0);
+            mAlbumId = intent.getLongExtra("albumid", 0);
+            intent = new Intent("internal.policy.impl.updateSongStatus");
+            context.sendBroadcast(intent);
+        }
+    };
+    public static String NowPlaying() {
+        if (mArtist != null && mPlaying) {
+            return (mArtist + " - " + mTrack);
+        } else {
+            return "";
+        }
+    }
+
+    public static long SongId() {
+        return mSongId;
+    }
+
+    public static long AlbumId() {
+        return mAlbumId;
     }
 }
 

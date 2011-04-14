@@ -1,4 +1,5 @@
 /*
+ * Patched by Sven Dawitz; Copyright (C) 2011 CyanogenMod Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +34,7 @@ import com.android.internal.view.menu.SubMenuBuilder;
 import android.app.KeyguardManager;
 import android.app.SearchManager;
 import android.content.ActivityNotFoundException;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
@@ -47,6 +49,7 @@ import android.os.Bundle;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.telephony.TelephonyManager;
 import android.util.AndroidRuntimeException;
 import android.util.Config;
@@ -78,6 +81,8 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+
+import java.net.URISyntaxException;
 
 /**
  * Android-specific Window.
@@ -164,7 +169,7 @@ public class PhoneWindow extends Window implements MenuBuilder.Callback {
     private SearchManager mSearchManager = null;
 
     private TelephonyManager mTelephonyManager = null;
-    
+
     public PhoneWindow(Context context) {
         super(context);
         mLayoutInflater = LayoutInflater.from(context);
@@ -1250,6 +1255,17 @@ public class PhoneWindow extends Window implements MenuBuilder.Callback {
                 if (event.getRepeatCount() == 0) {
                     dispatcher.startTracking(event, this);
                 } else if (event.isLongPress() && dispatcher.isTracking(event)) {
+                    // start custom app
+                    boolean mCustomLongSearchAppToggle=(Settings.System.getInt(getContext().getContentResolver(),
+                            Settings.System.USE_CUSTOM_LONG_SEARCH_APP_TOGGLE, 0) == 1);
+
+                    if(mCustomLongSearchAppToggle){
+                        runCustomApp(Settings.System.getString(getContext().getContentResolver(),
+                            Settings.System.USE_CUSTOM_LONG_SEARCH_APP_ACTIVITY));
+                        break;
+                    }
+
+                    // default behavior
                     Configuration config = getContext().getResources().getConfiguration(); 
                     if (config.keyboard == Configuration.KEYBOARD_NOKEYS
                             || config.hardKeyboardHidden
@@ -1401,7 +1417,14 @@ public class PhoneWindow extends Window implements MenuBuilder.Callback {
                     break;
                 }
                 if (event.isTracking() && !event.isCanceled()) {
-                    launchDefaultSearch();
+                    boolean mCustomSearchAppToggle=(Settings.System.getInt(getContext().getContentResolver(),
+                            Settings.System.USE_CUSTOM_SEARCH_APP_TOGGLE, 0) == 1);
+
+                    if(mCustomSearchAppToggle)
+                        runCustomApp(Settings.System.getString(getContext().getContentResolver(),
+                            Settings.System.USE_CUSTOM_SEARCH_APP_ACTIVITY));
+                    else
+                        launchDefaultSearch();
                 }
                 return true;
             }
@@ -2801,10 +2824,27 @@ public class PhoneWindow extends Window implements MenuBuilder.Callback {
     }
 
     void sendCloseSystemWindows() {
-        PhoneWindowManager.sendCloseSystemWindows(getContext(), null);
+        CmPhoneWindowManager.sendCloseSystemWindows(getContext(), null);
     }
 
     void sendCloseSystemWindows(String reason) {
-        PhoneWindowManager.sendCloseSystemWindows(getContext(), reason);
+        CmPhoneWindowManager.sendCloseSystemWindows(getContext(), reason);
     }
+
+    void runCustomApp(String uri) {
+        if (uri != null) {
+            try {
+                Intent i = Intent.parseUri(uri, 0);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+                getContext().startActivity(i);
+            } catch (URISyntaxException e) {
+
+            } catch (ActivityNotFoundException e) {
+
+            }
+        }
+    }
+
+
 }

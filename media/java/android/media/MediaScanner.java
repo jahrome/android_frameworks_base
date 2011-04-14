@@ -402,6 +402,7 @@ public class MediaScanner
         private long mLastModified;
         private long mFileSize;
         private String mWriter;
+        private int mCompilation;
 
         public FileCacheEntry beginFile(String path, String mimeType, long lastModified, long fileSize) {
 
@@ -486,6 +487,7 @@ public class MediaScanner
             mPath = path;
             mLastModified = lastModified;
             mWriter = null;
+            mCompilation = 0;
 
             return entry;
         }
@@ -596,6 +598,8 @@ public class MediaScanner
                 mDuration = parseSubstring(value, 0, 0);
             } else if (name.equalsIgnoreCase("writer") || name.startsWith("writer;")) {
                 mWriter = value.trim();
+            } else if (name.equalsIgnoreCase("compilation")) {
+                mCompilation = parseSubstring(value, 0, 0);
             }
         }
 
@@ -646,6 +650,7 @@ public class MediaScanner
                 }
                 map.put(Audio.Media.TRACK, mTrack);
                 map.put(Audio.Media.DURATION, mDuration);
+                map.put(Audio.Media.COMPILATION, mCompilation);
             }
             return map;
         }
@@ -781,7 +786,7 @@ public class MediaScanner
                 result = ContentUris.withAppendedId(tableUri, rowId);
                 mMediaProvider.update(result, values, null, null);
             }
-            if (mProcessGenres && mGenre != null) {
+            if (mProcessGenres && mGenre != null && isAudio) {
                 String genre = mGenre;
                 Uri uri = mGenreCache.get(genre);
                 if (uri == null) {
@@ -1215,8 +1220,12 @@ public class MediaScanner
             prescan(path);
 
             File file = new File(path);
+
+            // lastModified is in milliseconds on Files.
+            long lastModifiedSeconds = file.lastModified() / 1000;
+
             // always scan the file, so we can return the content://media Uri for existing files
-            return mClient.doScanFile(path, mimeType, file.lastModified(), file.length(), true);
+            return mClient.doScanFile(path, mimeType, lastModifiedSeconds, file.length(), true);
         } catch (RemoteException e) {
             Log.e(TAG, "RemoteException in MediaScanner.scanFile()", e);
             return null;

@@ -63,6 +63,7 @@ import android.os.PowerManager;
 import android.os.Process;
 import android.os.RemoteException;
 import android.os.ServiceManager;
+import android.os.SystemProperties;
 import android.os.WorkSource;
 import android.provider.Settings;
 import android.util.Slog;
@@ -94,11 +95,12 @@ import com.android.internal.R;
  */
 public class WifiService extends IWifiManager.Stub {
     private static final String TAG = "WifiService";
-    private static final boolean DBG = false;
+    private static final boolean DBG = true;
     private static final Pattern scanResultPattern = Pattern.compile("\t+");
     private final WifiStateTracker mWifiStateTracker;
     /* TODO: fetch a configurable interface */
     private static final String SOFTAP_IFACE = "wl0.1";
+    private static final String TI_SOFTAP_IFACE = "tiap0";
 
     private Context mContext;
     private int mWifiApState;
@@ -174,6 +176,8 @@ public class WifiService extends IWifiManager.Stub {
     private static final int MESSAGE_SET_CHANNELS       = 8;
     private static final int MESSAGE_ENABLE_NETWORKS    = 9;
     private static final int MESSAGE_START_SCAN         = 10;
+    private static final int MESSAGE_REPORT_WORKSOURCE  = 11;
+    private static final int MESSAGE_ENABLE_RSSI_POLLING = 12;
 
 
     private final  WifiHandler mWifiHandler;
@@ -681,8 +685,13 @@ public class WifiService extends IWifiManager.Stub {
             /* Configuration changed on a running access point */
             if(enable && (wifiConfig != null)) {
                 try {
-                    nwService.setAccessPoint(wifiConfig, mWifiStateTracker.getInterfaceName(),
-                                             SOFTAP_IFACE);
+                    if (SystemProperties.getBoolean("wifi.hotspot.ti", false)) {
+                        nwService.setAccessPoint(wifiConfig, mWifiStateTracker.getInterfaceName(),
+                                                 TI_SOFTAP_IFACE);
+                    } else {
+                        nwService.setAccessPoint(wifiConfig, mWifiStateTracker.getInterfaceName(),
+                                                 SOFTAP_IFACE);
+                    }
                     setWifiApConfiguration(wifiConfig);
                     return true;
                 } catch(Exception e) {
@@ -720,15 +729,28 @@ public class WifiService extends IWifiManager.Stub {
                 wifiConfig.allowedKeyManagement.set(KeyMgmt.NONE);
             }
 
-            if (!mWifiStateTracker.loadDriver()) {
-                Slog.e(TAG, "Failed to load Wi-Fi driver for AP mode");
-                setWifiApEnabledState(WIFI_AP_STATE_FAILED, uid, DriverAction.NO_DRIVER_UNLOAD);
-                return false;
+            if (SystemProperties.getBoolean("wifi.hotspot.ti", false)) {
+                if (!mWifiStateTracker.loadHotspotDriver()) {
+                    Slog.e(TAG, "Failed to load Wi-Fi driver for AP mode");
+                    setWifiApEnabledState(WIFI_AP_STATE_FAILED, uid, DriverAction.NO_DRIVER_UNLOAD);
+                    return false;
+                }
+            } else {
+                if (!mWifiStateTracker.loadDriver()) {
+                    Slog.e(TAG, "Failed to load Wi-Fi driver for AP mode");
+                    setWifiApEnabledState(WIFI_AP_STATE_FAILED, uid, DriverAction.NO_DRIVER_UNLOAD);
+                    return false;
+                }
             }
 
             try {
-                nwService.startAccessPoint(wifiConfig, mWifiStateTracker.getInterfaceName(),
-                                           SOFTAP_IFACE);
+                if (SystemProperties.getBoolean("wifi.hotspot.ti", false)) {
+                    nwService.startAccessPoint(wifiConfig, mWifiStateTracker.getInterfaceName(),
+                                               TI_SOFTAP_IFACE);
+                } else {
+                    nwService.startAccessPoint(wifiConfig, mWifiStateTracker.getInterfaceName(),
+                                               SOFTAP_IFACE);
+                }
             } catch(Exception e) {
                 Slog.e(TAG, "Exception in startAccessPoint()");
                 setWifiApEnabledState(WIFI_AP_STATE_FAILED, uid, DriverAction.DRIVER_UNLOAD);
@@ -747,10 +769,18 @@ public class WifiService extends IWifiManager.Stub {
                 return false;
             }
 
-            if (!mWifiStateTracker.unloadDriver()) {
-                Slog.e(TAG, "Failed to unload Wi-Fi driver for AP mode");
-                setWifiApEnabledState(WIFI_AP_STATE_FAILED, uid, DriverAction.NO_DRIVER_UNLOAD);
-                return false;
+            if (SystemProperties.getBoolean("wifi.hotspot.ti", false)) {
+                if (!mWifiStateTracker.unloadHotspotDriver()) {
+                    Slog.e(TAG, "Failed to unload Wi-Fi driver for AP mode");
+                    setWifiApEnabledState(WIFI_AP_STATE_FAILED, uid, DriverAction.NO_DRIVER_UNLOAD);
+                    return false;
+                }
+            } else {
+                if (!mWifiStateTracker.unloadDriver()) {
+                    Slog.e(TAG, "Failed to unload Wi-Fi driver for AP mode");
+                    setWifiApEnabledState(WIFI_AP_STATE_FAILED, uid, DriverAction.NO_DRIVER_UNLOAD);
+                    return false;
+                }
             }
         }
 
@@ -778,7 +808,11 @@ public class WifiService extends IWifiManager.Stub {
          * Unload the driver if going to a failed state
          */
         if ((mWifiApState == WIFI_AP_STATE_FAILED) && (flag == DriverAction.DRIVER_UNLOAD)) {
-            mWifiStateTracker.unloadDriver();
+            if (SystemProperties.getBoolean("wifi.hotspot.ti", false)) {
+                mWifiStateTracker.unloadHotspotDriver();
+            } else {
+                mWifiStateTracker.unloadDriver();
+            }
         }
 
         long ident = Binder.clearCallingIdentity();
@@ -901,6 +935,15 @@ public class WifiService extends IWifiManager.Stub {
         if (!TextUtils.isEmpty(value)) {
             try {
                 config.hiddenSSID = Integer.parseInt(value) != 0;
+            } catch (NumberFormatException ignore) {
+            }
+        }
+
+        value = mWifiStateTracker.getNetworkVariable(netId, WifiConfiguration.modeVarName);
+        config.adhocSSID = false;
+        if (!TextUtils.isEmpty(value)) {
+            try {
+                config.adhocSSID = Integer.parseInt(value) != 0;
             } catch (NumberFormatException ignore) {
             }
         }
@@ -1081,6 +1124,55 @@ public class WifiService extends IWifiManager.Stub {
                     Slog.d(TAG, "failed to set BSSID: "+config.BSSID);
                 }
                 break setVariables;
+            }
+
+            if(config.adhocSSID) {
+                if (DBG) {
+                    Slog.d(TAG, "setting adhoc network");
+                }
+                //Set Adhoc Mode
+                if (!mWifiStateTracker.setNetworkVariable(
+                        netId,
+                        WifiConfiguration.modeVarName,
+                        config.modeAdhoc)) {
+                    if (DBG) {
+                        Slog.d(TAG, "failed to set adhoc mode: " + config.adhocSSID);
+                    }
+                    break setVariables;
+                }
+
+                String frequency;
+                if (config.frequency != 0) {
+                    frequency = Integer.toString(config.frequency);
+                } else {
+                    //Default to channel 11
+                    frequency = Integer.toString(WifiConfiguration.ChannelFrequency.CHANNEL_11);
+                }
+
+                //Set frequency
+                if (!mWifiStateTracker.setNetworkVariable(
+                        netId,
+                        WifiConfiguration.frequencyVarName,
+                        frequency)) {
+                    if (DBG) {
+                        Slog.d(TAG, "failed to set frequency: " + frequency);
+                    }
+                    break setVariables;
+                }
+            } else {
+                if (DBG) {
+                    Slog.d(TAG, "setting non adhoc network");
+                }
+                //Set Infrastructure Mode
+                if (!mWifiStateTracker.setNetworkVariable(
+                        netId,
+                        WifiConfiguration.modeVarName,
+                        config.modeInfrastructure)) {
+                    if (DBG) {
+                        Slog.d(TAG, "failed to set infrastructure mode: " + config.adhocSSID);
+                    }
+                    break setVariables;
+                }
             }
 
             String allowedKeyManagementString =
@@ -1664,8 +1756,8 @@ public class WifiService extends IWifiManager.Stub {
                 mScreenOff = false;
                 // Once the screen is on, we are not keeping WIFI running
                 // because of any locks so clear that tracking immediately.
-                reportStartWorkSource();
-                mWifiStateTracker.enableRssiPolling(true);
+                sendReportWorkSourceMessage();
+                sendEnableRssiPollingMessage(true);
                 /* DHCP or other temporary failures in the past can prevent
                  * a disabled network from being connected to, enable on screen on
                  */
@@ -1677,7 +1769,7 @@ public class WifiService extends IWifiManager.Stub {
                     Slog.d(TAG, "ACTION_SCREEN_OFF");
                 }
                 mScreenOff = true;
-                mWifiStateTracker.enableRssiPolling(false);
+                sendEnableRssiPollingMessage(false);
                 /*
                  * Set a timer to put Wi-Fi to sleep, but only if the screen is off
                  * AND the "stay on while plugged in" setting doesn't match the
@@ -1715,7 +1807,7 @@ public class WifiService extends IWifiManager.Stub {
                     Slog.d(TAG, "got ACTION_DEVICE_IDLE");
                 }
                 mDeviceIdle = true;
-                reportStartWorkSource();
+                sendReportWorkSourceMessage();
             } else if (action.equals(Intent.ACTION_BATTERY_CHANGED)) {
                 /*
                  * Set a timer to put Wi-Fi to sleep, but only if the screen is off
@@ -1820,6 +1912,15 @@ public class WifiService extends IWifiManager.Stub {
     private void sendEnableNetworksMessage() {
         Message.obtain(mWifiHandler, MESSAGE_ENABLE_NETWORKS).sendToTarget();
     }
+
+    private void sendReportWorkSourceMessage() {
+        Message.obtain(mWifiHandler, MESSAGE_REPORT_WORKSOURCE).sendToTarget();
+    }
+
+    private void sendEnableRssiPollingMessage(boolean enable) {
+        Message.obtain(mWifiHandler, MESSAGE_ENABLE_RSSI_POLLING, enable ? 1 : 0, 0).sendToTarget();
+    }
+
 
     private void reportStartWorkSource() {
         synchronized (mWifiStateTracker) {
@@ -2020,6 +2121,12 @@ public class WifiService extends IWifiManager.Stub {
                             break;
                     }
                     mWifiStateTracker.scan(forceActive);
+                    break;
+                case MESSAGE_REPORT_WORKSOURCE:
+                    reportStartWorkSource();
+                    break;
+                case MESSAGE_ENABLE_RSSI_POLLING:
+                    mWifiStateTracker.enableRssiPolling(msg.arg1 == 1);
                     break;
             }
         }
@@ -2245,7 +2352,7 @@ public class WifiService extends IWifiManager.Stub {
 
             // Be aggressive about adding new locks into the accounted state...
             // we want to over-report rather than under-report.
-            reportStartWorkSource();
+            sendReportWorkSourceMessage();
 
             updateWifiState();
             return true;

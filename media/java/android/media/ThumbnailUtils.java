@@ -83,7 +83,7 @@ public class ThumbnailUtils {
      *
      * @param filePath the path of image file
      * @param kind could be MINI_KIND or MICRO_KIND
-     * @return Bitmap
+     * @return Bitmap, or null on failures
      *
      * @hide This method is only used by media framework and media provider internally.
      */
@@ -123,6 +123,8 @@ public class ThumbnailUtils {
                 bitmap = BitmapFactory.decodeFileDescriptor(fd, null, options);
             } catch (IOException ex) {
                 Log.e(TAG, "", ex);
+            } catch (OutOfMemoryError oom) {
+                Log.e(TAG, "Unable to decode file " + filePath + ". OutOfMemoryError.", oom);
             }
         }
 
@@ -146,9 +148,8 @@ public class ThumbnailUtils {
         Bitmap bitmap = null;
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
         try {
-            retriever.setMode(MediaMetadataRetriever.MODE_CAPTURE_FRAME_ONLY);
             retriever.setDataSource(filePath);
-            bitmap = retriever.captureFrame();
+            bitmap = retriever.getFrameAtTime(-1);
         } catch (IllegalArgumentException ex) {
             // Assume this is a corrupt video file
         } catch (RuntimeException ex) {

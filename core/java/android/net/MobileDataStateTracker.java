@@ -87,18 +87,16 @@ public class MobileDataStateTracker extends NetworkStateTracker {
             mEnabled = false;
         }
 
-        mDnsPropNames = new String[] {
-                "net.rmnet0.dns1",
-                "net.rmnet0.dns2",
-                "net.eth0.dns1",
-                "net.eth0.dns2",
-                "net.eth0.dns3",
-                "net.eth0.dns4",
-                "net.gprs.dns1",
-                "net.gprs.dns2",
-                "net.ppp0.dns1",
-                "net.ppp0.dns2"};
+        String[] ifNames = SystemProperties.get(
+            "mobiledata.interfaces",
+            "rmnet0,eth0,gprs,ppp0"
+        ).split(",");
 
+        mDnsPropNames = new String[2 * ifNames.length];
+        for (int i = 0; i < ifNames.length; ++i) {
+            mDnsPropNames[2*i+0] = "net." + ifNames[i] + ".dns1";
+            mDnsPropNames[2*i+1] = "net." + ifNames[i] + ".dns2";
+        }
     }
 
     /**
@@ -149,6 +147,11 @@ public class MobileDataStateTracker extends NetworkStateTracker {
         ConnectivityManager mConnectivityManager;
         public void onReceive(Context context, Intent intent) {
             synchronized(this) {
+                // update state and roaming before we set the state - only state changes are
+                // noticed
+                TelephonyManager tm = TelephonyManager.getDefault();
+                setRoamingStatus(tm.isNetworkRoaming());
+                setSubtype(tm.getNetworkType(), tm.getNetworkTypeName());
                 if (intent.getAction().equals(TelephonyIntents.
                         ACTION_ANY_DATA_CONNECTION_STATE_CHANGED)) {
                     Phone.DataState state = getMobileDataState(intent);
@@ -254,9 +257,6 @@ public class MobileDataStateTracker extends NetworkStateTracker {
                             reason == null ? "" : "(" + reason + ")");
                     setDetailedState(DetailedState.FAILED, reason, apnName);
                 }
-                TelephonyManager tm = TelephonyManager.getDefault();
-                setRoamingStatus(tm.isNetworkRoaming());
-                setSubtype(tm.getNetworkType(), tm.getNetworkTypeName());
             }
         }
     }

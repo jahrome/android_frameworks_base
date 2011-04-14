@@ -55,6 +55,7 @@ private:
 
     OMXNodeInstance *mOwner;
     bool mDone;
+    bool mStarted;
     Condition mQueueChanged;
     List<omx_message> mQueue;
 
@@ -71,7 +72,8 @@ private:
 
 OMX::CallbackDispatcher::CallbackDispatcher(OMXNodeInstance *owner)
     : mOwner(owner),
-      mDone(false) {
+      mDone(false),
+      mStarted(false) {
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
@@ -89,12 +91,18 @@ OMX::CallbackDispatcher::~CallbackDispatcher() {
         mQueueChanged.signal();
     }
 
+    // Don't call join on myself
+    CHECK(mThread != pthread_self());
+
     void *dummy;
     pthread_join(mThread, &dummy);
 }
 
 void OMX::CallbackDispatcher::post(const omx_message &msg) {
     Mutex::Autolock autoLock(mLock);
+    while (!mStarted) {
+        mQueueChanged.wait(mLock);
+    }
 
     mQueue.push_back(msg);
     mQueueChanged.signal();
@@ -119,6 +127,12 @@ void OMX::CallbackDispatcher::threadEntry() {
     setpriority(PRIO_PROCESS, 0, ANDROID_PRIORITY_AUDIO);
     prctl(PR_SET_NAME, (unsigned long)"OMXCallbackDisp", 0, 0, 0);
 
+    {
+        Mutex::Autolock autoLock(mLock);
+        mStarted = true;
+        mQueueChanged.signal();
+    }
+
     for (;;) {
         omx_message msg;
 
@@ -128,7 +142,7 @@ void OMX::CallbackDispatcher::threadEntry() {
                 mQueueChanged.wait(mLock);
             }
 
-            if (mDone) {
+            if (mDone && mQueue.empty()) {
                 break;
             }
 
@@ -249,9 +263,12 @@ status_t OMX::freeNode(node_id node) {
 
     status_t err = instance->freeNode(mMaster);
 
-    index = mDispatchers.indexOfKey(node);
-    CHECK(index >= 0);
-    mDispatchers.removeItemsAt(index);
+    {
+        Mutex::Autolock autoLock(mLock);
+        index = mDispatchers.indexOfKey(node);
+        CHECK(index >= 0);
+        mDispatchers.removeItemsAt(index);
+    }
 
     return err;
 }
@@ -375,6 +392,7 @@ OMX_ERRORTYPE OMX::OnFillBufferDone(
     LOGV("OnFillBufferDone buffer=%p", pBuffer);
 
     omx_message msg;
+    long offset = 0;
     msg.type = omx_message::FILL_BUFFER_DONE;
     msg.node = node;
     msg.u.extended_buffer_data.buffer = pBuffer;
@@ -385,8 +403,28 @@ OMX_ERRORTYPE OMX::OnFillBufferDone(
     msg.u.extended_buffer_data.platform_private = pBuffer->pPlatformPrivate;
     msg.u.extended_buffer_data.data_ptr = pBuffer->pBuffer;
 
-    findDispatcher(node)->post(msg);
+#ifdef TARGET_7X30
+    PLATFORM_PRIVATE_LIST *pPlatfromList = (PLATFORM_PRIVATE_LIST *)pBuffer->pPlatformPrivate;
+    PLATFORM_PRIVATE_ENTRY *pPlatformEntry;
+    PLATFORM_PRIVATE_PMEM_INFO *pPMEMInfo;
 
+    if(pPlatfromList) {
+      for(size_t i=0; i<pPlatfromList->nEntries; i++) {
+	if(pPlatfromList->entryList->type == PLATFORM_PRIVATE_PMEM)
+	  {
+	    pPlatformEntry = (PLATFORM_PRIVATE_ENTRY *)pPlatfromList->entryList;
+	    pPMEMInfo = (PLATFORM_PRIVATE_PMEM_INFO *)pPlatformEntry->entry;
+	    if(pPMEMInfo) {
+	      offset = pPMEMInfo->offset;
+	    }
+	    break;
+	  }
+      }
+    }
+    msg.u.extended_buffer_data.pmem_offset = offset;
+#endif
+
+    findDispatcher(node)->post(msg);
     return OMX_ErrorNone;
 }
 
@@ -525,6 +563,13 @@ sp<IOMXRenderer> OMX::createRenderer(
                 surface,
                 displayWidth, displayHeight,
                 encodedWidth, encodedHeight);
+
+        if (((SoftwareRenderer *)impl)->initCheck() != OK) {
+            delete impl;
+            impl = NULL;
+
+            return NULL;
+        }
     }
 
     return new OMXRenderer(impl);

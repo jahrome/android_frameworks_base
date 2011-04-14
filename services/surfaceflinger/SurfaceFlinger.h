@@ -209,6 +209,12 @@ public:
 
             overlay_control_device_t* getOverlayEngine() const;
 
+            inline int                  getRenderEffect() const { return mRenderEffect; }
+            inline int                  getRenderColorR() const { return mRenderColorR; }
+            inline int                  getRenderColorG() const { return mRenderColorG; }
+            inline int                  getRenderColorB() const { return mRenderColorB; }
+            inline int                  getUseDithering() const { return mUseDithering; }
+
     status_t removeLayer(const sp<LayerBase>& layer);
     status_t addLayer(const sp<LayerBase>& layer);
     status_t invalidateLayerVisibility(const sp<LayerBase>& layer);
@@ -307,9 +313,9 @@ private:
             bool        lockPageFlip(const LayerVector& currentLayers);
             void        unlockPageFlip(const LayerVector& currentLayers);
             void        handleRepaint();
+            bool        handleBypassLayer();
             void        postFramebuffer();
             void        composeSurfaces(const Region& dirty);
-            void        unlockClients();
 
 
             ssize_t     addClientLayer(const sp<Client>& client,
@@ -322,6 +328,7 @@ private:
             uint32_t    setTransactionFlags(uint32_t flags);
             void        commitTransaction();
 
+            void        setBypassLayer(const sp<LayerBase>& layer);
 
             status_t captureScreenImplLocked(DisplayID dpy,
                     sp<IMemoryHeap>* heap,
@@ -369,6 +376,7 @@ private:
     volatile    int32_t                 mTransactionFlags;
     volatile    int32_t                 mTransactionCount;
                 Condition               mTransactionCV;
+                SortedVector< sp<LayerBase> > mLayerPurgatory;
                 bool                    mResizeTransationPending;
 
                 // protected by mStateLock (but we could use another lock)
@@ -399,11 +407,16 @@ private:
                 int32_t                     mFreezeCount;
                 nsecs_t                     mFreezeDisplayTime;
                 Vector< sp<LayerBase> >     mVisibleLayersSortedByZ;
+                wp<Layer>                   mBypassLayer;
 
 
                 // don't use a lock for these, we don't care
                 int                         mDebugRegion;
                 int                         mDebugBackground;
+                int                         mRenderEffect;
+		int			    mRenderColorR;
+		int			    mRenderColorG;
+		int			    mRenderColorB;
                 volatile nsecs_t            mDebugInSwapBuffers;
                 nsecs_t                     mLastSwapBufferTime;
                 volatile nsecs_t            mDebugInTransaction;
@@ -422,6 +435,8 @@ private:
 
    // only written in the main thread, only read in other threads
    volatile     int32_t                     mSecureFrameBuffer;
+
+                bool                        mUseDithering;
 };
 
 // ---------------------------------------------------------------------------

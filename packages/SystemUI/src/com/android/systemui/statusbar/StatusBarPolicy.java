@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2008 The Android Open Source Project
+ * Patched by Sven Dawitz; Copyright (C) 2011 CyanogenMod Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,13 +15,14 @@
  * limitations under the License.
  */
 
-package com.android.systemui.statusbar.policy;
+package com.android.systemui.statusbar;
 
-import android.app.StatusBarManager;
 import android.app.AlertDialog;
+import android.app.StatusBarManager;
 import android.bluetooth.BluetoothA2dp;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothHeadset;
+import android.bluetooth.BluetoothHid;
 import android.bluetooth.BluetoothPbap;
 import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
@@ -28,9 +30,7 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.res.TypedArray;
-import android.graphics.PixelFormat;
-import android.graphics.Typeface;
+import android.database.ContentObserver;
 import android.graphics.drawable.Drawable;
 import android.location.LocationManager;
 import android.media.AudioManager;
@@ -50,16 +50,8 @@ import android.telephony.PhoneStateListener;
 import android.telephony.ServiceState;
 import android.telephony.SignalStrength;
 import android.telephony.TelephonyManager;
-import android.text.format.DateFormat;
-import android.text.style.CharacterStyle;
-import android.text.style.RelativeSizeSpan;
-import android.text.style.ForegroundColorSpan;
-import android.text.style.StyleSpan;
-import android.text.Spannable;
-import android.text.SpannableStringBuilder;
 import android.util.Slog;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.view.WindowManagerImpl;
 import android.widget.ImageView;
@@ -72,8 +64,9 @@ import com.android.internal.telephony.TelephonyIntents;
 import com.android.internal.telephony.cdma.EriInfo;
 import com.android.internal.telephony.cdma.TtyIntent;
 import com.android.server.am.BatteryStatsService;
-
 import com.android.systemui.R;
+import com.android.wimax.WimaxConstants;
+import com.android.wimax.WimaxSettingsHelper;
 
 /**
  * This class contains all of the policy about which icons are installed in the status
@@ -321,6 +314,7 @@ public class StatusBarPolicy {
     // bluetooth device status
     private int mBluetoothHeadsetState;
     private boolean mBluetoothA2dpConnected;
+    private int mBluetoothHidState;
     private int mBluetoothPbapState;
     private boolean mBluetoothEnabled;
 
@@ -340,6 +334,24 @@ public class StatusBarPolicy {
 
     private int mLastWifiSignalLevel = -1;
     private boolean mIsWifiConnected = false;
+
+    // wimax
+    private static final int[][] sWimaxSignalImages = {
+            { R.drawable.stat_sys_wimax_signal_1,
+              R.drawable.stat_sys_wimax_signal_2,
+              R.drawable.stat_sys_wimax_signal_3,
+              R.drawable.stat_sys_wimax_signal_4 },
+            { R.drawable.stat_sys_wimax_signal_1_fully,
+              R.drawable.stat_sys_wimax_signal_2_fully,
+              R.drawable.stat_sys_wimax_signal_3_fully,
+              R.drawable.stat_sys_wimax_signal_4_fully }
+        };
+    private static final int sWimaxTemporarilyNotConnectedImage = 
+            R.drawable.stat_sys_wimax_signal_0;
+
+    private int mLastWimaxSignalLevel = -1;
+    private boolean mIsWimaxConnected = false;
+    private WimaxSettingsHelper mWimaxSettingsHelper;
 
     // state of inet connection - 0 not connected, 100 connected
     private int mInetCondition = 0;
@@ -370,7 +382,9 @@ public class StatusBarPolicy {
             }
             else if (action.equals(BluetoothAdapter.ACTION_STATE_CHANGED) ||
                     action.equals(BluetoothHeadset.ACTION_STATE_CHANGED) ||
+                    action.equals(BluetoothHid.HID_DEVICE_STATE_CHANGED_ACTION) ||
                     action.equals(BluetoothA2dp.ACTION_SINK_STATE_CHANGED) ||
+                    action.equals(BluetoothHid.HID_DEVICE_STATE_CHANGED_ACTION) ||
                     action.equals(BluetoothPbap.PBAP_STATE_CHANGED_ACTION)) {
                 updateBluetooth(intent);
             }
@@ -379,6 +393,11 @@ public class StatusBarPolicy {
                     action.equals(WifiManager.RSSI_CHANGED_ACTION)) {
                 updateWifi(intent);
             }
+            else if (action.equals(WimaxConstants.NETWORK_STATE_CHANGED_ACTION) ||
+                    action.equals(WimaxConstants.WIMAX_ENABLED_CHANGED_ACTION) ||
+                    action.equals(WimaxConstants.RSSI_CHANGED_ACTION)) {
+                updateWimax(intent);
+            }
             else if (action.equals(LocationManager.GPS_ENABLED_CHANGE_ACTION) ||
                     action.equals(LocationManager.GPS_FIX_CHANGE_ACTION)) {
                 updateGps(intent);
@@ -386,6 +405,10 @@ public class StatusBarPolicy {
             else if (action.equals(AudioManager.RINGER_MODE_CHANGED_ACTION) ||
                     action.equals(AudioManager.VIBRATE_SETTING_CHANGED_ACTION)) {
                 updateVolume();
+            }
+            else if (action.equals(Intent.ACTION_HEADSET_PLUG)) {
+                int state = intent.getIntExtra("state", 0);
+                mService.setIconVisibility("headset", (state == 1));
             }
             else if (action.equals(TelephonyIntents.ACTION_SIM_STATE_CHANGED)) {
                 updateSimState(intent);
@@ -401,11 +424,38 @@ public class StatusBarPolicy {
         }
     };
 
+    private boolean mShowCmBattery;
+
+    class SettingsObserver extends ContentObserver {
+        SettingsObserver(Handler handler) {
+            super(handler);
+        }
+
+        void observe() {
+            ContentResolver resolver = mContext.getContentResolver();
+            resolver.registerContentObserver(Settings.System.getUriFor(
+                    Settings.System.STATUS_BAR_CM_BATTERY), false, this);
+        }
+
+        @Override public void onChange(boolean selfChange) {
+            updateSettings();
+        }
+    }
+
+    // phone_signal visibility
+    private boolean mPhoneSignalHidden;
+
     public StatusBarPolicy(Context context) {
         mContext = context;
         mService = (StatusBarManager)context.getSystemService(Context.STATUS_BAR_SERVICE);
         mSignalStrength = new SignalStrength();
         mBatteryStats = BatteryStatsService.getService();
+        mWimaxSettingsHelper = new WimaxSettingsHelper(context);
+
+        // settings observer for cm-battery change
+        SettingsObserver settingsObserver = new SettingsObserver(mHandler);
+        settingsObserver.observe();
+        updateSettings();
 
         // storage
         mStorageManager = (StorageManager) context.getSystemService(Context.STORAGE_SERVICE);
@@ -419,6 +469,19 @@ public class StatusBarPolicy {
         mPhone = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
         mPhoneSignalIconId = R.drawable.stat_sys_signal_null;
         mService.setIcon("phone_signal", mPhoneSignalIconId, 0);
+
+        // load config to determine if phone should be hidden
+        try {
+            mPhoneSignalHidden = mContext.getResources().getBoolean(
+                R.bool.config_statusbar_hide_phone_signal);
+        } catch (Exception e) {
+            mPhoneSignalHidden = false;
+        }
+
+        // hide phone_signal icon if hidden
+        if (mPhoneSignalHidden) {
+            mService.setIconVisibility("phone_signal", false);
+        }
 
         // register for phone state notifications.
         ((TelephonyManager)mContext.getSystemService(Context.TELEPHONY_SERVICE))
@@ -437,6 +500,13 @@ public class StatusBarPolicy {
         mService.setIcon("wifi", sWifiSignalImages[0][0], 0);
         mService.setIconVisibility("wifi", false);
         // wifi will get updated by the sticky intents
+
+        // wimax
+        if (mWimaxSettingsHelper.isWimaxSupported()) {
+            mService.setIcon("wimax", sWimaxSignalImages[0][0], 0);
+            mService.setIconVisibility("wimax", false);
+            // wimax will get updated by the sticky intents
+        }
 
         // TTY status
         mService.setIcon("tty",  R.drawable.stat_sys_tty_mode, 0);
@@ -478,6 +548,10 @@ public class StatusBarPolicy {
         mService.setIconVisibility("volume", false);
         updateVolume();
 
+        // headset
+        mService.setIcon("headset", com.android.internal.R.drawable.stat_sys_headset, 0);
+        mService.setIconVisibility("headset", false);
+
         IntentFilter filter = new IntentFilter();
 
         // Register for Intent broadcasts for...
@@ -487,16 +561,21 @@ public class StatusBarPolicy {
         filter.addAction(Intent.ACTION_POWER_CONNECTED);
         filter.addAction(Intent.ACTION_ALARM_CHANGED);
         filter.addAction(Intent.ACTION_SYNC_STATE_CHANGED);
+        filter.addAction(Intent.ACTION_HEADSET_PLUG);
         filter.addAction(AudioManager.RINGER_MODE_CHANGED_ACTION);
         filter.addAction(AudioManager.VIBRATE_SETTING_CHANGED_ACTION);
         filter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
         filter.addAction(BluetoothHeadset.ACTION_STATE_CHANGED);
+        filter.addAction(BluetoothHid.HID_DEVICE_STATE_CHANGED_ACTION);
         filter.addAction(BluetoothA2dp.ACTION_SINK_STATE_CHANGED);
         filter.addAction(BluetoothPbap.PBAP_STATE_CHANGED_ACTION);
         filter.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
         filter.addAction(WifiManager.SUPPLICANT_CONNECTION_CHANGE_ACTION);
         filter.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION);
         filter.addAction(WifiManager.RSSI_CHANGED_ACTION);
+        filter.addAction(WimaxConstants.WIMAX_ENABLED_CHANGED_ACTION);
+        filter.addAction(WimaxConstants.NETWORK_STATE_CHANGED_ACTION);
+        filter.addAction(WimaxConstants.RSSI_CHANGED_ACTION);
         filter.addAction(LocationManager.GPS_ENABLED_CHANGE_ACTION);
         filter.addAction(LocationManager.GPS_FIX_CHANGE_ACTION);
         filter.addAction(TelephonyIntents.ACTION_SIM_STATE_CHANGED);
@@ -531,6 +610,7 @@ public class StatusBarPolicy {
         final int id = intent.getIntExtra("icon-small", 0);
         int level = intent.getIntExtra("level", 0);
         mService.setIcon("battery", id, level);
+        mService.setIconVisibility("battery", !mShowCmBattery);
 
         boolean plugged = intent.getIntExtra("plugged", 0) != 0;
         level = intent.getIntExtra("level", -1);
@@ -744,6 +824,30 @@ public class StatusBarPolicy {
             }
             updateSignalStrength(); // apply any change in mInetCondition
             break;
+        case ConnectivityManager.TYPE_WIMAX:
+            mInetCondition = inetCondition;
+            if (info.isConnected()) {
+                mIsWimaxConnected = true;
+                int iconId;
+                if (mLastWimaxSignalLevel == -1) {
+                    iconId = sWimaxSignalImages[mInetCondition][0];
+                } else {
+                    iconId = sWimaxSignalImages[mInetCondition][mLastWimaxSignalLevel];
+                }
+                mService.setIcon("wimax", iconId, 0);
+                // Show the icon since wi-fi is connected
+                mService.setIconVisibility("wimax", true);
+            } else {
+                mLastWimaxSignalLevel = -1;
+                mIsWimaxConnected = false;
+                int iconId = sWimaxSignalImages[0][0];
+
+                mService.setIcon("wimax", iconId, 0);
+                // Hide the icon since we're not connected
+                mService.setIconVisibility("wimax", false);
+            }
+            updateSignalStrength(); // apply any change in mInetCondition
+            break;
         }
     }
 
@@ -852,6 +956,10 @@ public class StatusBarPolicy {
                 mPhoneSignalIconId = R.drawable.stat_sys_signal_null;
             }
             mService.setIcon("phone_signal", mPhoneSignalIconId, 0);
+            // set phone_signal visibility false if hidden
+            if (mPhoneSignalHidden) {
+                mService.setIconVisibility("phone_signal", false);
+            }
             return;
         }
 
@@ -1076,11 +1184,15 @@ public class StatusBarPolicy {
         } else if (action.equals(BluetoothPbap.PBAP_STATE_CHANGED_ACTION)) {
             mBluetoothPbapState = intent.getIntExtra(BluetoothPbap.PBAP_STATE,
                     BluetoothPbap.STATE_DISCONNECTED);
+        } else if (action.equals(BluetoothHid.HID_DEVICE_STATE_CHANGED_ACTION)) {
+            mBluetoothHidState = intent.getIntExtra(BluetoothHid.HID_DEVICE_STATE,
+                    BluetoothHid.STATE_DISCONNECTED);
         } else {
             return;
         }
 
         if (mBluetoothHeadsetState == BluetoothHeadset.STATE_CONNECTED || mBluetoothA2dpConnected ||
+                mBluetoothHidState == BluetoothHid.STATE_CONNECTED ||
                 mBluetoothPbapState == BluetoothPbap.STATE_CONNECTED) {
             iconId = R.drawable.stat_sys_data_bluetooth_connected;
         }
@@ -1120,6 +1232,73 @@ public class StatusBarPolicy {
                     iconId = sWifiTemporarilyNotConnectedImage;
                 }
                 mService.setIcon("wifi", iconId, 0);
+            }
+        }
+    }
+
+    private final void updateWimax(Intent intent) {
+        final String action = intent.getAction();
+        if (action.equals(WimaxConstants.WIMAX_ENABLED_CHANGED_ACTION)) {
+
+	    int wimaxStatus = intent.getIntExtra(WimaxConstants.CURRENT_WIMAX_ENABLED_STATE,
+	            WimaxConstants.WIMAX_ENABLED_STATE_UNKNOWN);
+            final boolean enabled = (wimaxStatus == WimaxConstants.WIMAX_ENABLED_STATE_ENABLED);
+
+            if (!enabled) {
+                // If disabled, hide the icon. (We show icon when connected.)
+                mService.setIconVisibility("wimax", false);
+            }
+
+        } else if (action.equals(WimaxConstants.NETWORK_STATE_CHANGED_ACTION)) {
+
+            final NetworkInfo networkInfo = (NetworkInfo) intent.getParcelableExtra(WimaxConstants.EXTRA_NETWORK_INFO);
+
+            int iconId;
+            if (networkInfo != null && networkInfo.isConnected()) {
+                mIsWimaxConnected = true;
+                if (mLastWimaxSignalLevel == -1) {
+                    iconId = sWimaxSignalImages[mInetCondition][0];
+                } else {
+                    if (mLastWimaxSignalLevel > 3) {
+                        mLastWimaxSignalLevel = 3;
+                    } else if (mLastWimaxSignalLevel <= 0) {
+                        mLastWimaxSignalLevel = 0;
+                    }
+                    iconId = sWimaxSignalImages[mInetCondition][mLastWimaxSignalLevel];
+                }
+
+                // Show the icon since wimax is connected
+                mService.setIconVisibility("wimax", true);
+
+            } else {
+                mIsWimaxConnected = false;
+                iconId = sWimaxSignalImages[mInetCondition][0];
+
+                // Hide the icon since we're not connected
+                mService.setIconVisibility("wimax", false);
+            }
+
+            mService.setIcon("wimax", iconId, 0);
+        } else if (action.equals(WimaxConstants.RSSI_CHANGED_ACTION)) {
+            int rssi = intent.getIntExtra(WimaxConstants.EXTRA_NEW_RSSI_LEVEL, -200);
+            int newSignalLevel = rssi;
+
+            int iconId;
+
+            if (newSignalLevel > 3) {
+                newSignalLevel = 3;
+            } else if (mLastWimaxSignalLevel <= 0) {
+                newSignalLevel = 0;
+            }
+
+            if (newSignalLevel != mLastWimaxSignalLevel) {
+                mLastWimaxSignalLevel = newSignalLevel;
+                if (mIsWimaxConnected) {
+                    iconId = sWimaxSignalImages[mInetCondition][newSignalLevel];
+                } else {
+                    iconId = sWimaxTemporarilyNotConnectedImage;
+                }
+                mService.setIcon("wimax", iconId, 0);
             }
         }
     }
@@ -1217,5 +1396,13 @@ public class StatusBarPolicy {
                 break;
             }
         }
+    }
+
+    private void updateSettings(){
+        ContentResolver resolver = mContext.getContentResolver();
+
+        mShowCmBattery = (Settings.System.getInt(resolver,
+                Settings.System.STATUS_BAR_CM_BATTERY, 0) == 1);
+        mService.setIconVisibility("battery", !mShowCmBattery);
     }
 }

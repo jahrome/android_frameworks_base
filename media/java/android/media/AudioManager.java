@@ -18,9 +18,10 @@ package android.media;
 
 import android.annotation.SdkConstant;
 import android.annotation.SdkConstant.SdkConstantType;
+import android.app.ProfileGroup;
+import android.app.ProfileManager;
 import android.content.ComponentName;
 import android.content.Context;
-import android.database.ContentObserver;
 import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
@@ -30,9 +31,7 @@ import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.provider.Settings;
 import android.util.Log;
-import android.view.KeyEvent;
 
-import java.util.Iterator;
 import java.util.HashMap;
 
 /**
@@ -45,6 +44,8 @@ public class AudioManager {
 
     private final Context mContext;
     private final Handler mHandler;
+
+    private final ProfileManager mProfileManager;
 
     private static String TAG = "AudioManager";
     private static boolean DEBUG = false;
@@ -175,10 +176,11 @@ public class AudioManager {
         11, // STREAM_MUSIC
         6,  // STREAM_ALARM
         5,  // STREAM_NOTIFICATION
-        7,  // STREAM_BLUETOOTH_SCO
+        11,  // STREAM_BLUETOOTH_SCO
         7,  // STREAM_SYSTEM_ENFORCED
         11, // STREAM_DTMF
-        11  // STREAM_TTS
+        11,  // STREAM_TTS
+        11 // STREAM_FM
     };
 
     /**
@@ -345,6 +347,7 @@ public class AudioManager {
     public AudioManager(Context context) {
         mContext = context;
         mHandler = new Handler(context.getMainLooper());
+        mProfileManager = (ProfileManager)context.getSystemService(Context.PROFILE_SERVICE);
     }
 
     private static IAudioService getService()
@@ -598,6 +601,25 @@ public class AudioManager {
      * @see #getVibrateSetting(int)
      */
     public boolean shouldVibrate(int vibrateType) {
+        String packageName = mContext.getPackageName();
+        // Don't apply profiles for "android" context, as these could
+        // come from the NotificationManager, and originate from a real package.
+        if(!packageName.equals("android")){
+            ProfileGroup profileGroup = mProfileManager.getActiveProfileGroup(packageName);
+            if(profileGroup != null){
+                Log.v(TAG, "shouldVibrate, group: " + profileGroup.getName() + " mode: " + profileGroup.getVibrateMode());
+                switch(profileGroup.getVibrateMode()){
+                    case OVERRIDE :
+                        return true;
+                    case SUPPRESS :
+                        return false;
+                    case DEFAULT :
+                        // Drop through
+                }
+            }
+        }else{
+            Log.v(TAG, "Not applying override for 'android' package");
+        }
         IAudioService service = getService();
         try {
             return service.shouldVibrate(vibrateType);
@@ -966,9 +988,14 @@ public class AudioManager {
      */
     public static final int MODE_RINGTONE           = AudioSystem.MODE_RINGTONE;
     /**
-     * In call audio mode. A call is established.
+     * In call audio mode. A telephony call is established.
      */
     public static final int MODE_IN_CALL            = AudioSystem.MODE_IN_CALL;
+    /**
+     * @hide
+     * In communication audio mode. An audio/video chat or VoIP call is established.
+     */
+    public static final int MODE_IN_COMMUNICATION   = AudioSystem.MODE_IN_COMMUNICATION;
 
     /* Routing bits for setRouting/getRouting API */
     /**
@@ -1215,6 +1242,13 @@ public class AudioManager {
         return Settings.System.getInt(mContext.getContentResolver(), Settings.System.SOUND_EFFECTS_ENABLED, 0) != 0;
     }
 
+    /**
+     * See if haptic feedback is enabled for screen touches of objects (called by ViewRoot)
+     * @hide
+     */
+    public boolean queryHapticsAllEnabled() {
+        return Settings.System.getInt(mContext.getContentResolver(), Settings.System.HAPTIC_FEEDBACK_ALL_ENABLED, 0) != 0;
+    }
 
     /**
      *  Load Sound effects.
@@ -1466,7 +1500,7 @@ public class AudioManager {
         IAudioService service = getService();
         try {
             status = service.abandonAudioFocus(mAudioFocusDispatcher,
-                    getIdForAudioFocusListener(l));
+                    getIdForAudioFocusListener(l), mICallBack);
         } catch (RemoteException e) {
             Log.e(TAG, "Can't call abandonAudioFocus() from AudioService due to "+e);
         }

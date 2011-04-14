@@ -594,6 +594,8 @@ InputDispatcher::KeyEntry* InputDispatcher::synthesizeKeyRepeatLocked(
 
     if (entry->repeatCount == 1) {
         entry->flags |= AKEY_EVENT_FLAG_LONG_PRESS;
+    } else {
+        entry->flags &= ~AKEY_EVENT_FLAG_LONG_PRESS;
     }
 
     mKeyRepeatState.nextRepeatTime = currentTime + keyRepeatDelay;
@@ -1405,8 +1407,13 @@ String8 InputDispatcher::getApplicationWindowLabelLocked(const InputApplication*
 
 void InputDispatcher::pokeUserActivityLocked(const EventEntry* eventEntry) {
     int32_t eventType = POWER_MANAGER_BUTTON_EVENT;
-    if (eventEntry->type == EventEntry::TYPE_MOTION) {
+    switch (eventEntry->type) {
+    case EventEntry::TYPE_MOTION: {
         const MotionEntry* motionEntry = static_cast<const MotionEntry*>(eventEntry);
+        if (motionEntry->action == AMOTION_EVENT_ACTION_CANCEL) {
+            return;
+        }
+
         if (motionEntry->source & AINPUT_SOURCE_CLASS_POINTER) {
             switch (motionEntry->action) {
             case AMOTION_EVENT_ACTION_DOWN:
@@ -1424,6 +1431,15 @@ void InputDispatcher::pokeUserActivityLocked(const EventEntry* eventEntry) {
                 break;
             }
         }
+        break;
+    }
+    case EventEntry::TYPE_KEY: {
+        const KeyEntry* keyEntry = static_cast<const KeyEntry*>(eventEntry);
+        if (keyEntry->flags & AKEY_EVENT_FLAG_CANCELED) {
+            return;
+        }
+        break;
+    }
     }
 
     CommandEntry* commandEntry = postCommandLocked(
@@ -2125,6 +2141,11 @@ void InputDispatcher::notifyMotion(nsecs_t eventTime, int32_t deviceId, int32_t 
     }
 
     policyFlags |= POLICY_FLAG_TRUSTED;
+    if ((source & AINPUT_SOURCE_CLASS_NAVIGATION) &&
+                    (action == AMOTION_EVENT_ACTION_DOWN || action == AMOTION_EVENT_ACTION_UP)) {
+            mPolicy->interceptNavigationButtonBeforeQueueing(eventTime, deviceId,
+                flags, action, policyFlags);
+    }
     mPolicy->interceptGenericBeforeQueueing(eventTime, /*byref*/ policyFlags);
 
     bool needWake;
