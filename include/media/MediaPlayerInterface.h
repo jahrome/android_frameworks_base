@@ -45,8 +45,8 @@ enum player_type {
     // The shared library with the test player is passed passed as an
     // argument to the 'test:' url in the setDataSource call.
     TEST_PLAYER = 5,
-    GST_PLAYER = 6,
-    FLAC_PLAYER = 7,
+    FLAC_PLAYER = 6,
+    GST_PLAYER = 7,
 };
 
 
