@@ -17,7 +17,7 @@
 
 // Proxy for media player implementations
 
-//#define LOG_NDEBUG 0
+#define LOG_NDEBUG 0
 #define LOG_TAG "MediaPlayerService"
 #include <utils/Log.h>
 
@@ -688,7 +688,14 @@ void MediaPlayerService::Client::disconnect()
 }
 
 static player_type getDefaultPlayerType() {
-    return GST_PLAYER;
+    char value[PROPERTY_VALUE_MAX];
+    property_get ("gstreamer.enabled", value, "1");
+    LOGD("gstreamer.enabled = %s", value);
+    if (*value == '1') {
+        return GST_PLAYER;
+    } else {
+        return STAGEFRIGHT_PLAYER;
+    }
 }
 
 player_type getPlayerType(int fd, int64_t offset, int64_t length)
