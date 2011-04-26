@@ -69,6 +69,12 @@ LOCAL_C_INCLUDES :=                                                 \
 	$(TOP)/external/tremolo/Tremolo 				\
 	$(TOP)/external/gstreamer_aggregate/gst-android/gstplayer
 
+
+ifeq ($(strip $(BOARD_USES_HW_MEDIARECORDER)),true)
+    LOCAL_SHARED_LIBRARIES += libhwmediarecorder
+    LOCAL_CFLAGS += -DUSE_BOARD_MEDIARECORDER
+endif
+
 LOCAL_MODULE:= libmediaplayerservice
 
 include $(BUILD_SHARED_LIBRARY)
