@@ -40,7 +40,9 @@
 #include "MidiMetadataRetriever.h"
 #include "MetadataRetrieverClient.h"
 #include "StagefrightMetadataRetriever.h"
+#if 0
 #include "GstMetadataRetriever.h"
+#endif
 
 /* desktop Linux needs a little help with gettid() */
 #if defined(HAVE_GETTID) && !defined(HAVE_ANDROID_OS)
@@ -105,14 +107,17 @@ static sp<MediaMetadataRetrieverBase> createRetriever(player_type playerType)
 {
     sp<MediaMetadataRetrieverBase> p;
     switch (playerType) {
+#if 0
         case GST_PLAYER:
         {
             p = new GstMetadataRetriever;
             break;
         }
+#endif
 #ifdef USE_BOARD_MEDIAPLUGIN
         case BOARD_HW_PLAYER:
 #endif
+        case GST_PLAYER:
         case STAGEFRIGHT_PLAYER:
         case FLAC_PLAYER:
         {
