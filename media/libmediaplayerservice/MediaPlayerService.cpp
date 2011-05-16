@@ -68,6 +68,8 @@
 #include <hardware_legacy/MediaPlayerHardwareInterface.h>
 #endif
 
+/* gst-android */
+#include "GstPlayer.h"
 
 /* desktop Linux needs a little help with gettid() */
 #if defined(HAVE_GETTID) && !defined(HAVE_ANDROID_OS)
@@ -686,10 +688,7 @@ void MediaPlayerService::Client::disconnect()
 }
 
 static player_type getDefaultPlayerType() {
-#ifdef USE_BOARD_MEDIAPLUGIN
-    return BOARD_HW_PLAYER;
-#endif
-    return STAGEFRIGHT_PLAYER;
+    return GST_PLAYER;
 }
 
 player_type getPlayerType(int fd, int64_t offset, int64_t length)
@@ -800,6 +799,10 @@ static sp<MediaPlayerBase> createPlayer(player_type playerType, void* cookie,
             p = createMediaPlayerHardware();
             break;
 #endif
+        case GST_PLAYER:
+            LOGV("Create GstPlayer");
+            p = new GstPlayer;
+            break;
     }
     if (p != NULL) {
         if (p->initCheck() == NO_ERROR) {

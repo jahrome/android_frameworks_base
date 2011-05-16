@@ -41,8 +41,6 @@ LOCAL_C_INCLUDES += \
     $(JNI_H_INCLUDE) \
     $(call include-path-for, corecg graphics)
 
-LOCAL_CFLAGS +=
-
 LOCAL_LDLIBS := -lpthread
 
 LOCAL_MODULE:= libmedia_jni

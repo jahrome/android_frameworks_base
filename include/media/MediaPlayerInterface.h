@@ -28,6 +28,7 @@
 #include <media/mediaplayer.h>
 #include <media/AudioSystem.h>
 #include <media/Metadata.h>
+#include <media/AudioTrack.h>
 
 namespace android {
 
@@ -46,6 +47,7 @@ enum player_type {
     TEST_PLAYER = 5,
     FLAC_PLAYER = 6,
     BOARD_HW_PLAYER = 7,
+    GST_PLAYER = 8,
 };
 
 
@@ -79,6 +81,7 @@ public:
         virtual float       msecsPerFrame() const = 0;
         virtual status_t    getPosition(uint32_t *position) = 0;
         virtual int         getSessionId() = 0;
+        virtual AudioTrack  *getTrack() = 0;
 
         // If no callback is specified, use the "write" API below to submit
         // audio data.
