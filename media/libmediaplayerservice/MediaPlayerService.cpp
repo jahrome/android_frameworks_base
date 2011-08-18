@@ -212,8 +212,16 @@ extmap FILE_EXTS [] =  {
         {".wma", PV_PLAYER},
         {".wmv", PV_PLAYER},
         {".asf", PV_PLAYER},
+#else
+        {".wma", GST_PLAYER},
+        {".wmv", GST_PLAYER},
+        {".asf", GST_PLAYER},
 #endif
         {".flac", FLAC_PLAYER},
+        {".avi", GST_PLAYER},
+        {".flv", GST_PLAYER},
+        {".mpeg", GST_PLAYER},
+        {".mpg", GST_PLAYER},
 };
 
 // TODO: Find real cause of Audio/Video delay in PV framework and remove this workaround
@@ -689,7 +697,7 @@ void MediaPlayerService::Client::disconnect()
 
 static player_type getDefaultPlayerType() {
     char value[PROPERTY_VALUE_MAX];
-    property_get ("gstreamer.enabled", value, "1");
+    property_get ("gstreamer.enabled", value, "0");
     LOGD("gstreamer.enabled = %s", value);
     if (*value == '1') {
         return GST_PLAYER;
